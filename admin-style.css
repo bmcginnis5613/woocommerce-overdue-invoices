@@ -1,0 +1,210 @@
+/* ============================================================
+   Admin styles for WC Incomplete Orders plugin
+   ============================================================ */
+
+.wrap table.wp-list-table {
+    margin-top: 20px;
+}
+
+.wrap table.wp-list-table th {
+    font-weight: 600;
+}
+
+.wrap table.wp-list-table tfoot td {
+    background-color: #f9f9f9;
+    padding: 15px;
+}
+
+/* ── Help tip ────────────────────────────────────────────── */
+/* ── Controls bar ────────────────────────────────────────── */
+.usr-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 20px 0;
+    padding: 15px;
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+/* ── Export buttons ──────────────────────────────────────── */
+.usr-export-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.usr-export-buttons .button .dashicons {
+    line-height: 28px;
+    margin-right: 3px;
+}
+
+/* ── Column toggles ──────────────────────────────────────── */
+.usr-column-toggles {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.usr-column-toggles strong {
+    margin-right: 5px;
+}
+
+.usr-column-toggles label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 3px;
+    transition: background-color 0.2s;
+}
+
+.usr-column-toggles label:hover {
+    background-color: #f0f0f1;
+}
+
+.usr-column-toggles label.usr-saved {
+    background-color: #d4edda;
+    transition: background-color 0.2s;
+}
+
+.usr-column-toggles input[type="checkbox"] {
+    margin: 0;
+}
+
+/* ── Status badges ───────────────────────────────────────── */
+.wco-status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.6;
+    white-space: nowrap;
+}
+
+.wco-status-badge.status-pending {
+    background-color: #fef3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+}
+
+.wco-status-badge.status-processing {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #17a2b8;
+}
+
+.wco-status-badge.status-on-hold {
+    background-color: #fff3cd;
+    color: #664d03;
+    border: 1px solid #fd7e14;
+}
+
+.wco-status-badge.status-cancelled {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #dc3545;
+}
+
+.wco-status-badge.status-refunded {
+    background-color: #e2e3e5;
+    color: #383d41;
+    border: 1px solid #6c757d;
+}
+
+.wco-status-badge.status-failed {
+    background-color: #f8d7da;
+    color: #491217;
+    border: 1px solid #b02a37;
+}
+
+.wco-status-badge.status-draft {
+    background-color: #f0f0f1;
+    color: #50575e;
+    border: 1px solid #a7aaad;
+}
+
+.wco-status-badge.status-custom {
+    background-color: #e8f0fe;
+    color: #1a56db;
+    border: 1px solid #76a9fa;
+}
+
+/* ── Item list ───────────────────────────────────────────── */
+.wco-item-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.wco-item-list li {
+    padding: 2px 0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.wco-item-list li + li {
+    border-top: 1px solid #f0f0f1;
+}
+
+/* ── Invoice link ────────────────────────────────────────── */
+.wco-invoice-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #2271b1;
+    text-decoration: none;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.wco-invoice-link:hover {
+    color: #135e96;
+    text-decoration: none;
+}
+
+.wco-invoice-link:hover .wco-invoice-number {
+    text-decoration: underline;
+}
+
+.wco-invoice-link .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    color: #d63638;
+}
+
+.wco-no-invoice {
+    color: #a7aaad;
+}
+
+/* ── Column transitions ──────────────────────────────────── */
+.usr-renewals-table th,
+.usr-renewals-table td {
+    transition: opacity 0.2s;
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media screen and (max-width: 782px) {
+    .usr-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .usr-export-buttons {
+        width: 100%;
+    }
+
+    .usr-export-buttons .button {
+        flex: 1;
+    }
+
+    .usr-column-toggles {
+        width: 100%;
+    }
+}
