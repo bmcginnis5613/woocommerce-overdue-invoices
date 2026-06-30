@@ -1,9 +1,12 @@
 <?php
-/**
- * Plugin Name: WooCommerce - Overdue Invoice
- * Description: Display all WooCommerce orders that have not yet been completed, including status, items, total, and PDF invoice link.
- * Version: 0.0.3
- */
+
+/*
+Plugin Name: WooCommerce - Overdue Invoices
+Description: Display all WooCommerce orders that have not yet been completed, including status, items, total, and PDF invoice link.
+Author: FirstTracks Marketing
+Author URI: https://firsttracksmarketing.com/
+Version: 1.0.0
+*/
 
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
