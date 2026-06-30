@@ -2,12 +2,88 @@
 /**
  * Plugin Name: WooCommerce - Overdue Invoice
  * Description: Display all WooCommerce orders that have not yet been completed, including status, items, total, and PDF invoice link.
- * Version: 0.0.1
+ * Version: 0.0.3
  */
 
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
+}
+
+if (!function_exists('wco_is_xlsx_export_request')) {
+    function wco_is_xlsx_export_request() {
+        return isset($_GET['action'], $_GET['page']) &&
+            $_GET['action'] === 'wco_export_xlsx' &&
+            $_GET['page'] === 'wc-incomplete-orders';
+    }
+}
+
+if (!function_exists('wco_write_export_error_log')) {
+    function wco_write_export_error_log($message) {
+        $primary_log_path = defined('WP_CONTENT_DIR')
+            ? WP_CONTENT_DIR . '/uploads/wc-overdue-invoices-export-error.log'
+            : __DIR__ . '/wc-overdue-invoices-export-error.log';
+        $fallback_log_path = __DIR__ . '/wc-overdue-invoices-export-error.log';
+        $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . $message . PHP_EOL;
+
+        if (@file_put_contents($primary_log_path, $line, FILE_APPEND) === false) {
+            @file_put_contents($fallback_log_path, $line, FILE_APPEND);
+        }
+    }
+}
+
+if (wco_is_xlsx_export_request()) {
+    register_shutdown_function(function () {
+        $error = error_get_last();
+        if (!$error) {
+            return;
+        }
+
+        $fatal_types = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR);
+        if (!in_array($error['type'], $fatal_types, true)) {
+            return;
+        }
+
+        wco_write_export_error_log(
+            $error['message'] . ' in ' . $error['file'] . ':' . $error['line']
+        );
+    });
+}
+
+if (!class_exists('WC_Overdue_Invoices_ZipStream_Compat', false)) {
+    class WC_Overdue_Invoices_ZipStream_Compat {
+        /**
+         * @param resource $fileHandle
+         */
+        public static function newZipStream($fileHandle) {
+            if (
+                (function_exists('enum_exists') && enum_exists('ZipStream\OperationMode')) ||
+                class_exists('ZipStream\OperationMode')
+            ) {
+                return new \ZipStream\ZipStream(
+                    enableZip64: false,
+                    outputStream: $fileHandle,
+                    sendHttpHeaders: false,
+                    defaultEnableZeroHeader: false
+                );
+            }
+
+            if (class_exists('ZipStream\Option\Archive')) {
+                $options = new \ZipStream\Option\Archive();
+                $options->setEnableZip64(false);
+                $options->setOutputStream($fileHandle);
+
+                return new \ZipStream\ZipStream(null, $options);
+            }
+
+            return new \ZipStream\ZipStream(
+                enableZip64: false,
+                outputStream: $fileHandle,
+                sendHttpHeaders: false,
+                defaultEnableZeroHeader: false
+            );
+        }
+    }
 }
 
 class WC_Incomplete_Orders {
@@ -378,65 +454,156 @@ class WC_Incomplete_Orders {
     }
 
     /**
-     * Export order rows to XLSX via PhpSpreadsheet
+     * Return whether any PhpSpreadsheet class/interface/trait is already loaded.
+     *
+     * Loading a second unprefixed PhpSpreadsheet copy in WordPress can mix class
+     * versions with other plugins and cause fatal method signature errors.
+     *
+     * @return bool
+     */
+    private function has_loaded_phpspreadsheet_symbols() {
+        $symbols = array_merge(get_declared_classes(), get_declared_interfaces());
+
+        if (function_exists('get_declared_traits')) {
+            $symbols = array_merge($symbols, get_declared_traits());
+        }
+
+        foreach ($symbols as $symbol) {
+            if (strpos($symbol, 'PhpOffice\\PhpSpreadsheet\\') === 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Export order rows to XLSX via PhpSpreadsheet.
      *
      * @param array $rows
      */
     private function export_xlsx(array $rows) {
         $autoload_path = plugin_dir_path(__FILE__) . 'vendor/autoload.php';
+        $temp_file     = '';
 
-        if (!file_exists($autoload_path)) {
-            wp_die('PhpSpreadsheet library is not installed. Run: composer require phpoffice/phpspreadsheet');
-        }
-
-        require_once $autoload_path;
-
-        if (!class_exists('PhpOffice\PhpSpreadsheet\Spreadsheet')) {
-            wp_die('PhpSpreadsheet failed to load. Run: composer install');
-        }
-
-        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
-        $sheet       = $spreadsheet->getActiveSheet();
-
-        // Headers
-        $headers = $this->get_export_headers();
-        $columns = array('A', 'B', 'C', 'D', 'E', 'F', 'G');
-
-        foreach ($headers as $index => $header) {
-            $sheet->setCellValue($columns[$index] . '1', $header);
-        }
-
-        $header_style = array(
-            'font' => array('bold' => true),
-            'fill' => array(
-                'fillType'   => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
-                'startColor' => array('rgb' => 'E8E8E8'),
-            ),
-        );
-        $sheet->getStyle('A1:G1')->applyFromArray($header_style);
-
-        // Data rows
-        $row = 2;
-        foreach ($rows as $r) {
-            foreach ($this->get_export_row($r) as $index => $value) {
-                $sheet->setCellValue($columns[$index] . $row, $value);
+        try {
+            if (!file_exists($autoload_path)) {
+                throw new \RuntimeException('PhpSpreadsheet library is not installed. Run: composer require phpoffice/phpspreadsheet');
             }
-            $row++;
+
+            $spreadsheet_loaded = class_exists('PhpOffice\PhpSpreadsheet\Spreadsheet');
+            $xlsx_writer_loaded = class_exists('PhpOffice\PhpSpreadsheet\Writer\Xlsx');
+            $using_bundled      = false;
+
+            if (!$spreadsheet_loaded || !$xlsx_writer_loaded) {
+                if ($this->has_loaded_phpspreadsheet_symbols()) {
+                    throw new \RuntimeException(
+                        'Another plugin has already loaded an incompatible PhpSpreadsheet version. ' .
+                        'Please temporarily deactivate that plugin for this export, or use a build of this plugin with PhpSpreadsheet namespace-prefixed.'
+                    );
+                }
+
+                class_alias(
+                    'WC_Overdue_Invoices_ZipStream_Compat',
+                    'PhpOffice\PhpSpreadsheet\Writer\ZipStream0'
+                );
+
+                require_once $autoload_path;
+                $using_bundled = true;
+            }
+
+            if (!class_exists('PhpOffice\PhpSpreadsheet\Spreadsheet')) {
+                throw new \RuntimeException('PhpSpreadsheet failed to load. Run: composer install');
+            }
+
+            if (!class_exists('PhpOffice\PhpSpreadsheet\Writer\Xlsx')) {
+                throw new \RuntimeException('PhpSpreadsheet XLSX writer failed to load. Run: composer install');
+            }
+
+            if ($using_bundled && !class_exists('PhpOffice\PhpSpreadsheet\Writer\ZipStream0', false)) {
+                class_alias(
+                    'WC_Overdue_Invoices_ZipStream_Compat',
+                    'PhpOffice\PhpSpreadsheet\Writer\ZipStream0'
+                );
+            }
+
+            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $sheet       = $spreadsheet->getActiveSheet();
+
+            // Headers
+            $headers = $this->get_export_headers();
+            $columns = array('A', 'B', 'C', 'D', 'E', 'F', 'G');
+
+            foreach ($headers as $index => $header) {
+                $sheet->setCellValue($columns[$index] . '1', $header);
+            }
+
+            $header_style = array(
+                'font' => array('bold' => true),
+                'fill' => array(
+                    'fillType'   => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => array('rgb' => 'E8E8E8'),
+                ),
+            );
+            $sheet->getStyle('A1:G1')->applyFromArray($header_style);
+
+            // Data rows
+            $row = 2;
+            foreach ($rows as $r) {
+                foreach ($this->get_export_row($r) as $index => $value) {
+                    $sheet->setCellValue($columns[$index] . $row, $value);
+                }
+                $row++;
+            }
+
+            foreach ($columns as $column) {
+                $sheet->getColumnDimension($column)->setAutoSize(true);
+            }
+
+            $filename  = 'incomplete-orders-' . date('Y-m-d') . '.xlsx';
+            $temp_file = wp_tempnam($filename);
+
+            if (!$temp_file) {
+                throw new \RuntimeException('Unable to create XLSX export file.');
+            }
+
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save($temp_file);
+
+            $file_size = filesize($temp_file);
+            if ($file_size === false || $file_size === 0) {
+                throw new \RuntimeException('Unable to finalize XLSX export file.');
+            }
+
+            while (ob_get_level() > 0) {
+                if (!@ob_end_clean()) {
+                    break;
+                }
+            }
+
+            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+            header('Content-Length: ' . $file_size);
+            header('Cache-Control: max-age=0');
+
+            readfile($temp_file);
+            @unlink($temp_file);
+            exit;
+        } catch (\Throwable $e) {
+            if ($temp_file && file_exists($temp_file)) {
+                @unlink($temp_file);
+            }
+
+            wco_write_export_error_log(
+                $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine()
+            );
+
+            $message = '<p>Unable to generate XLSX export.</p>' .
+                '<p><strong>Error:</strong> ' . esc_html($e->getMessage()) . '</p>' .
+                '<p><strong>Location:</strong> ' . esc_html($e->getFile() . ':' . $e->getLine()) . '</p>';
+
+            wp_die($message, 'XLSX Export Error', array('response' => 500));
         }
-
-        foreach ($columns as $column) {
-            $sheet->getColumnDimension($column)->setAutoSize(true);
-        }
-
-        $filename = 'incomplete-orders-' . date('Y-m-d') . '.xlsx';
-
-        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        header('Content-Disposition: attachment; filename="' . $filename . '"');
-        header('Cache-Control: max-age=0');
-
-        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
-        $writer->save('php://output');
-        exit;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
