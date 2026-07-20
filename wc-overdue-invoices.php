@@ -5,7 +5,7 @@ Plugin Name: WooCommerce - Overdue Invoices
 Description: Display all WooCommerce orders that have not yet been completed, including status, items, total, and PDF invoice link.
 Author: FirstTracks Marketing
 Author URI: https://firsttracksmarketing.com/
-Version: 1.0.0
+Version: 1.0.1
 */
 
 // Exit if accessed directly
@@ -91,6 +91,8 @@ if (!class_exists('WC_Overdue_Invoices_ZipStream_Compat', false)) {
 
 class WC_Incomplete_Orders {
 
+    private const THIRTY_DAYS_OVERDUE_ORDER_AGE_DAYS = 60;
+
     /**
      * Constructor
      */
@@ -128,14 +130,14 @@ class WC_Incomplete_Orders {
             'wco-admin',
             plugin_dir_url(__FILE__) . 'admin-style.css',
             array(),
-            '2.0.0'
+            '2.0.2'
         );
 
         wp_enqueue_script(
             'wco-admin',
             plugin_dir_url(__FILE__) . 'admin-script.js',
             array('jquery'),
-            '2.0.0',
+            '2.0.2',
             true
         );
 
@@ -195,9 +197,10 @@ class WC_Incomplete_Orders {
     /**
      * Return all WooCommerce orders that are NOT completed.
      *
+     * @param bool $thirty_days_overdue_only Whether to limit to orders 30+ days overdue.
      * @return WC_Order[]
      */
-    public function get_incomplete_orders() {
+    public function get_incomplete_orders($thirty_days_overdue_only = false) {
         if (!function_exists('wc_get_orders')) {
             return array();
         }
@@ -208,28 +211,80 @@ class WC_Incomplete_Orders {
             'wc-on-hold',
         );
 
-        return wc_get_orders(array(
+        $orders = wc_get_orders(array(
             'status'  => $incomplete_statuses,
             'limit'   => -1,
             'orderby' => 'date',
             'order'   => 'DESC',
             'type'    => 'shop_order',
         ));
+
+        if (!$thirty_days_overdue_only) {
+            return $orders;
+        }
+
+        return array_values(array_filter($orders, array($this, 'is_order_thirty_days_overdue')));
+    }
+
+    /**
+     * Return whether the 30+ days overdue filter is enabled.
+     *
+     * @return bool
+     */
+    private function is_thirty_days_overdue_filter_enabled() {
+        return isset($_GET['wco_30_days_overdue']) &&
+            sanitize_text_field(wp_unslash($_GET['wco_30_days_overdue'])) === '1';
+    }
+
+    /**
+     * Return the order-date cutoff for orders 30+ days overdue.
+     *
+     * Due dates are 30 days after the order date, so orders become 30 days
+     * overdue once they are at least 60 days old.
+     *
+     * @return string Date in Y-m-d format.
+     */
+    private function get_thirty_days_overdue_cutoff_date() {
+        $timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+        $cutoff   = new DateTimeImmutable('now', $timezone);
+
+        return $cutoff->modify('-' . self::THIRTY_DAYS_OVERDUE_ORDER_AGE_DAYS . ' days')->format('Y-m-d');
+    }
+
+    /**
+     * Return whether an order is 30+ days overdue.
+     *
+     * @param WC_Order $order
+     * @return bool
+     */
+    private function is_order_thirty_days_overdue(WC_Order $order) {
+        $order_date = $order->get_date_created();
+
+        if (!$order_date) {
+            return false;
+        }
+
+        return $order_date->date('Y-m-d') <= $this->get_thirty_days_overdue_cutoff_date();
     }
 
     /**
      * Return the export URL.
      *
      * @param string $format Either csv or xlsx.
+     * @param bool   $thirty_days_overdue_only Whether to include the overdue filter.
      * @return string
      */
-    private function get_export_url($format = 'xlsx') {
+    private function get_export_url($format = 'xlsx', $thirty_days_overdue_only = false) {
         $format = $format === 'csv' ? 'csv' : 'xlsx';
 
         $args = array(
             'action' => 'wco_export_' . $format,
             'page'   => 'wc-incomplete-orders',
         );
+
+        if ($thirty_days_overdue_only) {
+            $args['wco_30_days_overdue'] = '1';
+        }
 
         return wp_nonce_url(
             add_query_arg($args, admin_url('admin.php')),
@@ -391,7 +446,7 @@ class WC_Incomplete_Orders {
 
         check_admin_referer('wco_export');
 
-        $orders = $this->get_incomplete_orders();
+        $orders = $this->get_incomplete_orders($this->is_thirty_days_overdue_filter_enabled());
         $rows   = $this->build_order_rows($orders);
 
         if ($action === 'wco_export_csv') {
@@ -622,12 +677,13 @@ class WC_Incomplete_Orders {
             return;
         }
 
-        $column_prefs = $this->get_column_preferences();
-        $orders       = $this->get_incomplete_orders();
-        $rows         = $this->build_order_rows($orders);
+        $column_prefs               = $this->get_column_preferences();
+        $thirty_days_overdue_only   = $this->is_thirty_days_overdue_filter_enabled();
+        $orders                     = $this->get_incomplete_orders($thirty_days_overdue_only);
+        $rows                       = $this->build_order_rows($orders);
 
-        $csv_export_url  = $this->get_export_url('csv');
-        $xlsx_export_url = $this->get_export_url('xlsx');
+        $csv_export_url  = $this->get_export_url('csv', $thirty_days_overdue_only);
+        $xlsx_export_url = $this->get_export_url('xlsx', $thirty_days_overdue_only);
         ?>
         <div class="wrap">
             <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
@@ -644,36 +700,57 @@ class WC_Incomplete_Orders {
                     </a>
                 </div>
 
-                <div class="usr-column-toggles">
-                    <strong>Show/Hide Columns:</strong>
-                    <?php
-                    $toggles = array(
-                        'id'       => 'Order ID',
-                        'date'     => 'Date',
-                        'customer' => 'Customer',
-                        'status'   => 'Status',
-                        'items'    => 'Product',
-                        'total'    => 'Total',
-                        'invoice'  => 'Invoice #',
-                    );
-                    foreach ($toggles as $col_key => $col_label) :
-                    ?>
+                <div class="usr-column-controls">
+                    <div class="usr-column-toggles">
+                        <strong>Show/Hide Columns:</strong>
+                        <?php
+                        $toggles = array(
+                            'id'       => 'Order ID',
+                            'date'     => 'Date',
+                            'customer' => 'Customer',
+                            'status'   => 'Status',
+                            'items'    => 'Product',
+                            'total'    => 'Total',
+                            'invoice'  => 'Invoice #',
+                        );
+                        foreach ($toggles as $col_key => $col_label) :
+                        ?>
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    class="usr-column-toggle"
+                                    data-column="<?php echo esc_attr($col_key); ?>"
+                                    <?php checked($column_prefs[$col_key]); ?>
+                                >
+                                <?php echo esc_html($col_label); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <form class="wco-order-filters" method="get" action="<?php echo esc_url(admin_url('admin.php')); ?>">
+                        <input type="hidden" name="page" value="wc-incomplete-orders">
+                        <strong>Filters:</strong>
                         <label>
                             <input
                                 type="checkbox"
-                                class="usr-column-toggle"
-                                data-column="<?php echo esc_attr($col_key); ?>"
-                                <?php checked($column_prefs[$col_key]); ?>
+                                class="wco-overdue-filter-toggle"
+                                name="wco_30_days_overdue"
+                                value="1"
+                                <?php checked($thirty_days_overdue_only); ?>
                             >
-                            <?php echo esc_html($col_label); ?>
+                            30+ days overdue
                         </label>
-                    <?php endforeach; ?>
+                    </form>
                 </div>
             </div>
 
             <div id="wco-table-wrap">
                 <?php if (empty($rows)) : ?>
+                    <?php if ($thirty_days_overdue_only) : ?>
+                        <div class="notice notice-success"><p>No incomplete orders are 30+ days overdue.</p></div>
+                    <?php else : ?>
                     <div class="notice notice-success"><p>No incomplete orders found — all orders are completed!</p></div>
+                    <?php endif; ?>
                 <?php else : ?>
                     <?php $this->render_table($rows, $column_prefs); ?>
                 <?php endif; ?>
@@ -799,7 +876,7 @@ class WC_Incomplete_Orders {
             <tfoot>
                 <tr>
                     <td colspan="7">
-                        <strong>Total incomplete orders: <?php echo count($rows); ?></strong>
+                        <strong>Total shown incomplete orders: <?php echo count($rows); ?></strong>
                     </td>
                 </tr>
             </tfoot>
