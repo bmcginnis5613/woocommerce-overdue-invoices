@@ -1,6 +1,11 @@
 jQuery(document).ready(function ($) {
     'use strict';
 
+    // Apply order filters
+    $('.wco-overdue-filter-toggle').on('change', function () {
+        $(this).closest('form').trigger('submit');
+    });
+
     // ── Column visibility toggles ─────────────────────────────────────────
     $('.usr-column-toggle').on('change', function () {
         var $checkbox  = $(this);
