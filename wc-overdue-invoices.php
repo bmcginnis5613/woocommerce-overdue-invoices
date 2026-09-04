@@ -5,7 +5,7 @@ Plugin Name: WooCommerce - Overdue Invoices
 Description: Display all WooCommerce orders that have not yet been completed, including status, items, total, and PDF invoice link.
 Author: FirstTracks Marketing
 Author URI: https://firsttracksmarketing.com/
-Version: 1.0.2
+Version: 1.0.3
 */
 
 // Exit if accessed directly
@@ -314,8 +314,11 @@ class WC_Incomplete_Orders {
             }
 
             // ── Customer account and ACF user fields ───────────────────────────────
-            $user  = $customer_id ? get_userdata($customer_id) : false;
-            $email = $user ? $user->user_email : '';
+            $user              = $customer_id ? get_userdata($customer_id) : false;
+            $email             = $user ? $user->user_email : '';
+            $additional_emails = $customer_id
+                ? (string) get_user_meta($customer_id, 'wc_additional_email_addresses', true)
+                : '';
 
             $user_fields = array(
                 'group_number' => '',
@@ -357,6 +360,7 @@ class WC_Incomplete_Orders {
                 'invoice_number' => $invoice_number,
                 'invoice_url'    => $invoice_url,
                 'email'          => $email,
+                'extra_emails'   => $additional_emails,
                 'group_number'   => $user_fields['group_number'],
                 'local_board'    => $user_fields['local_board'],
                 'phone'          => $user_fields['phone'],
@@ -498,6 +502,7 @@ class WC_Incomplete_Orders {
             'Total',
             'Invoice #',
             'Email',
+            'Additional Emails',
             'Group Number',
             'Local Board',
             'Phone',
@@ -540,6 +545,7 @@ class WC_Incomplete_Orders {
             $formatted_total,
             $row['invoice_number'],
             $row['email'],
+            $row['extra_emails'],
             $row['group_number'],
             $row['local_board'],
             $row['phone'],
@@ -655,7 +661,7 @@ class WC_Incomplete_Orders {
 
             // Headers
             $headers = $this->get_export_headers();
-            $columns = array('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N');
+            $columns = array('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O');
 
             foreach ($headers as $index => $header) {
                 $sheet->setCellValue($columns[$index] . '1', $header);
@@ -668,7 +674,7 @@ class WC_Incomplete_Orders {
                     'startColor' => array('rgb' => 'E8E8E8'),
                 ),
             );
-            $sheet->getStyle('A1:N1')->applyFromArray($header_style);
+            $sheet->getStyle('A1:O1')->applyFromArray($header_style);
 
             // Data rows
             $row = 2;
