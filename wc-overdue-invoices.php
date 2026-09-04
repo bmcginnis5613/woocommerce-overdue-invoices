@@ -353,6 +353,7 @@ class WC_Incomplete_Orders {
                 'status'         => $order->get_status(),
                 'items'          => $item_names,
                 'total'          => $order->get_total(),
+                'currency'       => $order->get_currency(),
                 'invoice_number' => $invoice_number,
                 'invoice_url'    => $invoice_url,
                 'email'          => $email,
@@ -513,6 +514,11 @@ class WC_Incomplete_Orders {
      */
     private function get_export_row(array $row) {
         $date_invoiced_timestamp = $row['date'] ? strtotime($row['date']) : false;
+        $formatted_total = html_entity_decode(
+            wp_strip_all_tags(wc_price($row['total'], array('currency' => $row['currency']))),
+            ENT_QUOTES | ENT_HTML5,
+            'UTF-8'
+        );
         $product_names = array_map(
             function ($item_name) {
                 return html_entity_decode(
@@ -531,7 +537,7 @@ class WC_Incomplete_Orders {
             $row['customer'],
             ucwords(str_replace('-', ' ', $row['status'])),
             implode(', ', $product_names),
-            $row['total'],
+            $formatted_total,
             $row['invoice_number'],
             $row['email'],
             $row['group_number'],
@@ -765,7 +771,7 @@ class WC_Incomplete_Orders {
                         <?php
                         $toggles = array(
                             'id'       => 'Order ID',
-                            'date'     => 'Date',
+                            'date'     => 'Date Invoiced',
                             'customer' => 'Customer',
                             'status'   => 'Status',
                             'items'    => 'Product',
@@ -838,7 +844,7 @@ class WC_Incomplete_Orders {
                         Order
                     </th>
                     <th class="usr-col-date"<?php echo $hide('date'); ?>>
-                        Date
+                        Date Invoiced
                     </th>
                     <th class="usr-col-customer"<?php echo $hide('customer'); ?>>
                         Customer
