@@ -5,7 +5,7 @@ Plugin Name: WooCommerce - Overdue Invoices
 Description: Display all WooCommerce orders that have not yet been completed, including status, items, total, and PDF invoice link.
 Author: FirstTracks Marketing
 Author URI: https://firsttracksmarketing.com/
-Version: 1.0.1
+Version: 1.0.2
 */
 
 // Exit if accessed directly
@@ -302,7 +302,8 @@ class WC_Incomplete_Orders {
         $rows = array();
 
         foreach ($orders as $order) {
-            $order_id = $order->get_id();
+            $order_id    = $order->get_id();
+            $customer_id = $order->get_customer_id();
 
             // ── Customer name ─────────────────────────────────────────────
             $first_name = $order->get_billing_first_name();
@@ -312,12 +313,30 @@ class WC_Incomplete_Orders {
                 $customer = $order->get_billing_email() ?: '(Guest)';
             }
 
+            // ── Customer account and ACF user fields ───────────────────────────────
+            $user  = $customer_id ? get_userdata($customer_id) : false;
+            $email = $user ? $user->user_email : '';
+
+            $user_fields = array(
+                'group_number' => '',
+                'local_board'  => '',
+                'phone'        => '',
+                'mobile'       => '',
+                'sales_staff'  => '',
+            );
+
+            if ($customer_id) {
+                foreach (array_keys($user_fields) as $field_name) {
+                    $user_fields[$field_name] = (string) get_user_meta($customer_id, $field_name, true);
+                }
+            }
+
             // ── Order items ───────────────────────────────────────────────
             $item_names = array();
             foreach ($order->get_items() as $item) {
                 /** @var WC_Order_Item_Product $item */
                 $qty          = $item->get_quantity();
-                $item_names[] = esc_html($item->get_name()) . ($qty > 1 ? ' &times;' . $qty : '');
+                $item_names[] = $item->get_name() . ($qty > 1 ? ' ×' . $qty : '');
             }
 
             // ── Invoice number & PDF link ──────────────────────────
@@ -330,12 +349,18 @@ class WC_Incomplete_Orders {
                 'order_id'       => $order_id,
                 'date'           => $order->get_date_created() ? $order->get_date_created()->date('Y-m-d H:i:s') : '',
                 'customer'       => $customer,
-                'customer_id'    => $order->get_customer_id(),
+                'customer_id'    => $customer_id,
                 'status'         => $order->get_status(),
                 'items'          => $item_names,
                 'total'          => $order->get_total(),
                 'invoice_number' => $invoice_number,
                 'invoice_url'    => $invoice_url,
+                'email'          => $email,
+                'group_number'   => $user_fields['group_number'],
+                'local_board'    => $user_fields['local_board'],
+                'phone'          => $user_fields['phone'],
+                'mobile'         => $user_fields['mobile'],
+                'sales_staff'    => $user_fields['sales_staff'],
             );
         }
 
@@ -462,7 +487,22 @@ class WC_Incomplete_Orders {
      * @return string[]
      */
     private function get_export_headers() {
-        return array('Order ID', 'Date', 'Customer', 'Status', 'Product', 'Total', 'Invoice #');
+        return array(
+            'Order ID',
+            'Date Invoiced',
+            'Due Date',
+            'Customer',
+            'Status',
+            'Product',
+            'Total',
+            'Invoice #',
+            'Email',
+            'Group Number',
+            'Local Board',
+            'Phone',
+            'Mobile',
+            'Sales Staff',
+        );
     }
 
     /**
@@ -472,14 +512,33 @@ class WC_Incomplete_Orders {
      * @return array
      */
     private function get_export_row(array $row) {
+        $date_invoiced_timestamp = $row['date'] ? strtotime($row['date']) : false;
+        $product_names = array_map(
+            function ($item_name) {
+                return html_entity_decode(
+                    wp_strip_all_tags((string) $item_name),
+                    ENT_QUOTES | ENT_HTML5,
+                    'UTF-8'
+                );
+            },
+            $row['items']
+        );
+
         return array(
             $row['order_id'],
-            $row['date'] ? date('Y-m-d', strtotime($row['date'])) : '',
+            $date_invoiced_timestamp ? date('Y-m-d', $date_invoiced_timestamp) : '',
+            $date_invoiced_timestamp ? date('Y-m-d', strtotime('+30 days', $date_invoiced_timestamp)) : '',
             $row['customer'],
             ucwords(str_replace('-', ' ', $row['status'])),
-            implode(', ', array_map('strip_tags', $row['items'])),
+            implode(', ', $product_names),
             $row['total'],
             $row['invoice_number'],
+            $row['email'],
+            $row['group_number'],
+            $row['local_board'],
+            $row['phone'],
+            $row['mobile'],
+            $row['sales_staff'],
         );
     }
 
@@ -590,7 +649,7 @@ class WC_Incomplete_Orders {
 
             // Headers
             $headers = $this->get_export_headers();
-            $columns = array('A', 'B', 'C', 'D', 'E', 'F', 'G');
+            $columns = array('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N');
 
             foreach ($headers as $index => $header) {
                 $sheet->setCellValue($columns[$index] . '1', $header);
@@ -603,7 +662,7 @@ class WC_Incomplete_Orders {
                     'startColor' => array('rgb' => 'E8E8E8'),
                 ),
             );
-            $sheet->getStyle('A1:G1')->applyFromArray($header_style);
+            $sheet->getStyle('A1:N1')->applyFromArray($header_style);
 
             // Data rows
             $row = 2;
@@ -838,7 +897,7 @@ class WC_Incomplete_Orders {
                             <?php if (!empty($row['items'])) : ?>
                                 <ul class="wco-item-list">
                                     <?php foreach ($row['items'] as $item_name) : ?>
-                                        <li><?php echo wp_kses($item_name, array('strong' => array())); ?></li>
+                                        <li><?php echo esc_html($item_name); ?></li>
                                     <?php endforeach; ?>
                                 </ul>
                             <?php else : ?>
